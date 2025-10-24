@@ -1,32 +1,41 @@
 var game = {
   colorblind: (localStorage.colorblind && JSON.parse(localStorage.colorblind)) || 'false',
-  language: window.location.hash.substring(1) || 'en',
+  language: 'es',
   difficulty: 'easy',
   level: parseInt(localStorage.level, 10) || 0,
   answers: (localStorage.answers && JSON.parse(localStorage.answers)) || {},
   solved: (localStorage.solved && JSON.parse(localStorage.solved)) || [],
   changed: false,
   clickedCode: null,
+  playerName: localStorage.playerName || '',
+  initialized: false,
 
   start: function() {
-    // navigator.language can include '-'
-    // ref: https://developer.mozilla.org/en-US/docs/Web/API/NavigatorLanguage/language
-    var requestLang = window.navigator.language.split('-')[0];
-    if (window.location.hash === '' && requestLang !== 'en' && messages.languageActive.hasOwnProperty(requestLang)) {
-      game.language = requestLang;
-      window.location.hash = requestLang;
+    if (game.level >= levels.length || game.level < 0) {
+      game.level = 0;
     }
 
-    game.translate();
+    var validNames = levels.map(function(level) { return level.name; });
+    var validSet = new Set(validNames);
+
+    game.solved = game.solved.filter(function(name) {
+      return validSet.has(name);
+    });
+
+    Object.keys(game.answers).forEach(function(key) {
+      if (!validSet.has(key)) {
+        delete game.answers[key];
+      }
+    });
+
     $('#level-counter .total').text(levels.length);
     $('#editor').show();
-    $('#share').hide();
-    $('#language').val(game.language);
-    $('input[value="' + game.colorblind + '"]', '#colorblind').prop('checked', true);
+    $('#certificate').addClass('hidden');
 
     this.setHandlers();
     this.loadMenu();
     game.loadLevel(levels[game.level]);
+    game.initialized = true;
   },
 
   setHandlers: function() {
@@ -91,7 +100,7 @@ var game = {
     });
 
     $('#labelReset').on('click', function() {
-      var warningReset = messages.warningReset[game.language] || messages.warningReset.en;
+      var warningReset = '¿Deseas reiniciar el juego? Tu progreso se reiniciará.';
       var r = confirm(warningReset);
 
       if (r) {
@@ -101,59 +110,7 @@ var game = {
         game.loadLevel(levels[0]);
 
         $('.level-marker').removeClass('solved');
-      }
-    });
-
-    $('#labelSettings').on('click', function() {
-      $('#levelsWrapper').hide();
-      $('#settings .tooltip').toggle();
-      $('#instructions .tooltip').remove();
-    })
-
-    $('#language').on('change', function() {
-      window.location.hash = $(this).val();
-    });
-
-    $('#difficulty').on('change', function() {
-      game.difficulty = $('input:checked', '#difficulty').val();
-
-      // setting height will prevent a slight jump when the animation starts
-      var $instructions = $('#instructions');
-      var height = $instructions.height();
-      $instructions.css('height', height);
-
-      var $markers = $('.level-marker');
-
-      if (game.difficulty == 'hard' || game.difficulty == 'medium') {
-        $instructions.slideUp();
-
-        $markers.each(function() {
-          var $marker = $(this);
-          if ($marker[0].hasAttribute('title')) {
-            $marker.attr('data-title', $marker.attr('title'));
-            $marker.removeAttr('title');
-          }
-        });
-      } else {
-        $instructions.css('height', '').slideDown();
-
-        $markers.each(function() {
-          var $marker = $(this);
-          if ($marker[0].hasAttribute('data-title')) {
-            $marker.attr('title', $marker.attr('data-title'));
-            $marker.removeAttr('data-title');
-          }
-        });
-      }
-    });
-
-    $('#colorblind').on('change', function() {
-      game.colorblind = $('input:checked', '#colorblind').val();
-
-      if (game.colorblind == 'true') {
-        $('.lilypad, .frog').addClass('cb-friendly');
-      } else {
-        $('.lilypad, .frog').removeClass('cb-friendly');
+        game.updateProgress();
       }
     });
 
@@ -162,7 +119,7 @@ var game = {
       clickedCode = null;
     });
 
-    $('.tooltip, .toggle, #level-indicator').on('click', function(e) {
+    $('.tooltip, #level-indicator').on('click', function(e) {
       e.stopPropagation();
     });
 
@@ -172,22 +129,7 @@ var game = {
       localStorage.setItem('answers', JSON.stringify(game.answers));
       localStorage.setItem('solved', JSON.stringify(game.solved));
       localStorage.setItem('colorblind', JSON.stringify(game.colorblind));
-    }).on('hashchange', function() {
-      game.language = window.location.hash.substring(1) || 'en';
-      game.translate();
-
-      $('#tweet iframe').remove();
-      var html = '<a href="https://twitter.com/share" class="twitter-share-button"{count} data-url="https://flexboxfroggy.com" data-via="thomashpark">Tweet</a> ' +
-                 '<a href="https://twitter.com/thomashpark" class="twitter-follow-button" data-show-count="false">Follow @thomashpark</a>';
-      $('#tweet').html(html);
-
-      if (typeof twttr !== 'undefined') {
-        twttr.widgets.load();
-      }
-
-      if (game.language === 'en') {
-        history.replaceState({}, document.title, './');
-      }
+      localStorage.setItem('playerName', game.playerName);
     });
   },
 
@@ -210,6 +152,7 @@ var game = {
   },
 
   loadMenu: function() {
+    $('#levels').empty();
     levels.forEach(function(level, i) {
       var levelMarker = $('<span/>').addClass('level-marker').attr({'data-level': i, 'title': level.name}).text(i+1);
 
@@ -229,7 +172,6 @@ var game = {
     });
 
     $('#level-indicator').on('click', function() {
-      $('#settings .tooltip').hide();
       $('#levelsWrapper').toggle();
       $('#instructions .tooltip').remove();
     });
@@ -255,7 +197,7 @@ var game = {
 
   loadLevel: function(level) {
     $('#editor').show();
-    $('#share').hide();
+    $('#certificate').addClass('hidden');
     $('#background, #pond').removeClass('wrap').attr('style', '').empty();
     $('#levelsWrapper').hide();
     $('.level-marker').removeClass('current').eq(this.level).addClass('current');
@@ -264,7 +206,7 @@ var game = {
     $('#after').text(level.after);
     $('#next').removeClass('animated animation').addClass('disabled');
 
-    var instructions = level.instructions[game.language] || level.instructions.en;
+    var instructions = level.instructions[game.language] || level.instructions.en || '';
     $('#instructions').html(instructions);
 
     $('.arrow.disabled').removeClass('disabled');
@@ -281,6 +223,7 @@ var game = {
     $('#code').val(answer).focus();
 
     this.loadDocs();
+    game.updateProgress();
 
     var lines = Object.keys(level.style).length;
     $('#code').height(20 * lines).data("lines", lines);
@@ -340,7 +283,6 @@ var game = {
           }
 
           $('#levelsWrapper').hide();
-          $('#settings .tooltip').hide();
           $('#instructions .tooltip').remove();
           var html = docs[text][game.language] || docs[text].en;
           var tooltipX = code.offset().left;
@@ -449,14 +391,24 @@ var game = {
   },
 
   win: function() {
-    var solution = $('#code').val();
-
-    this.loadLevel(levelWin);
-
+    game.setProgress(100);
+    $('#levelsWrapper').hide();
     $('#editor').hide();
-    $('#code').val(solution);
-    $('#share').show();
+    $('#certificate .player-name').text(game.playerName || 'Jugador');
+    $('#certificate').removeClass('hidden');
+    $('#next').addClass('disabled');
+    $('.arrow').addClass('disabled');
     $('.frog .bg').removeClass('pulse').addClass('bounce');
+  },
+
+  setProgress: function(value) {
+    var progress = Math.max(0, Math.min(100, value));
+    $('.progress-fill').css('width', progress + '%');
+  },
+
+  updateProgress: function() {
+    var percent = (game.level / levels.length) * 100;
+    game.setProgress(percent);
   },
 
   transform: function() {
@@ -464,25 +416,6 @@ var game = {
     var rotate = 360 * Math.random();
 
     return {'transform': 'scale(' + scale + ') rotate(' + rotate + 'deg)'};
-  },
-
-  translate: function() {
-    document.title = messages.title[game.language] || messages.title.en;
-    $('html').attr('lang', game.language);
-
-    var level = $('#editor').is(':visible') ? levels[game.level] : levelWin;
-    var instructions = level.instructions[game.language] || level.instructions.en;
-    $('#instructions').html(instructions);
-    game.loadDocs();
-
-    $('.translate').each(function() {
-      var label = $(this).attr('id');
-      if (messages[label]) {
-        var text = messages[label][game.language] || messages[label].en;
-	  }
-
-      $('#' + label).text(text);
-    });
   },
 
   debounce: function(func, wait, immediate) {
@@ -540,5 +473,49 @@ var game = {
 };
 
 $(document).ready(function() {
-  game.start();
+  var storedName = game.playerName;
+
+  if (storedName) {
+    $('#player-name').val(storedName);
+  }
+  $('#player-name').focus();
+
+  var beginGame = function() {
+    var name = $('#player-name').val().trim();
+
+    if (!name) {
+      $('#player-name').addClass('input-error').focus();
+      return;
+    }
+
+    $('#player-name').removeClass('input-error');
+    game.playerName = name;
+    localStorage.setItem('playerName', name);
+    $('#welcome-modal').removeClass('visible').addClass('hidden');
+
+    if (!game.initialized) {
+      game.start();
+    }
+  };
+
+  $('#start-game').on('click', beginGame);
+  $('#player-name').on('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      beginGame();
+    }
+  }).on('input', function() {
+    $(this).removeClass('input-error');
+  });
+
+  $('#play-again').on('click', function() {
+    game.level = 0;
+    game.answers = {};
+    game.solved = [];
+    $('.level-marker').removeClass('solved');
+    $('#certificate').addClass('hidden');
+    $('#editor').show();
+    game.loadLevel(levels[0]);
+  });
+
 });
